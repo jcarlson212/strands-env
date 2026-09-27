@@ -16,6 +16,7 @@ An **agent environment** takes a task and runs the agent to completion over mult
 - **Define Environments** — Subclass `Environment`, add `@tool` functions, plug in `RewardFunction`; typed `Task` subclasses carry per-sample fields
 - **RL Training** — Token-level trajectories (TITO) for on-policy training with [strands-sglang](https://github.com/strands-rl/strands-sglang)
 - **Benchmarking** — CLI and `Evaluator` with checkpointing, resume, and custom metrics
+- **Exploration** — Inspect rollout diversity and steer group sampling with lightweight explorer agents
 
 ## Install
 
@@ -88,6 +89,29 @@ python -m strands_env.eval \
 > Raise `--n-samples-per-prompt` for more stable pass@k, and `--max-concurrency` if you're using a hosted sandbox service.
 
 > **Tip:** For a non-agentic benchmark (no tool use), don't override `get_tools()` — the base class returns `[]` by default.
+
+### Explore Rollouts
+
+Inspect how diverse a run's rollouts are: reward spread, zero-variance prompts (no GRPO signal), answer mode collapse, and tool-call strategies.
+
+```bash
+python -m strands_env.explore runs/terminal-bench-2/results.jsonl --top 10 --show <prompt_id>
+```
+
+Then steer sampling with an **explorer**, a lightweight agent that reads the rollouts a prompt has had so far and proposes a distinct strategy hint for each of its next rollouts:
+
+```python
+from strands_env.explore import ExploringSampler, HintPoolExplorer, LLMExplorer, analyze_group
+
+explorer = LLMExplorer(cheap_model_factory, instructions="Vary which tools the agent reaches for.")
+# or: HintPoolExplorer(["Work backwards from the goal.", "Verify with code before answering."])
+
+sampler = ExploringSampler(env.rollout, explorer, n_samples=8)  # 4 unguided, then 4 guided
+group = await sampler.sample(task)                              # [ExploredRollout(task, hint, result), ...]
+analyze_group([r.result for r in group])                        # GroupAnalysis(zero_variance=..., distinct_answers=...)
+```
+
+`rollout_fn` can be `env.rollout`, `EnvironmentActorPool.rollout`, or your training loop's generate call. See [`examples/explore_demo.py`](examples/explore_demo.py).
 
 ## Built-in Environments
 
